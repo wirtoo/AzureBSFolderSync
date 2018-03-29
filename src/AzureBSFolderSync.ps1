@@ -1,13 +1,11 @@
 <# Parameters #> 
 Param ( 
     [Parameter(Mandatory=$true,Position=0)][String]$Path, 
-    [Parameter(Mandatory=$false,Position=1)][String]$LogFilePath = "C:\AzureBSFolderSync.log"
-) 
-
-<# Global variables #> 
-    $Global:AzureStorageAccountName = "StorageAccountName" 
-    $Global:AzureStorageAccountKey = "StorageAccountAccessKey"
-    $Global:AzureBlobContainerName = "BlobStorageContainerName"
+    [Parameter(Mandatory=$true,Position=1)][String]$Storage,
+    [Parameter(Mandatory=$true,Position=2)][String]$Container,
+    [Parameter(Mandatory=$true,Position=3)][String]$Key,
+    [Parameter(Mandatory=$false,Position=4)][String]$Log = "C:\AzureBSFolderSync.log"
+)
 
     Function Write-Log
     { 
@@ -15,36 +13,36 @@ Param (
             [Parameter(Mandatory=$true,Position=0)][String]$Value
         )
         $date = ("[{0:yyyy-MM-dd HH:mm:ss}] " -f (Get-Date)) 
-        "$($date)$($Value)" | Add-Content -Path $LogFilePath
+        "$($date)$($Value)" | Add-Content -Path $Log
     }
 
     Write-Log -Value "SYNCHRONIZATION STARTED"
     # Initiate the Azure Storage Context 
-    $context = New-AzureStorageContext -StorageAccountName $Global:AzureStorageAccountName -StorageAccountKey $Global:AzureStorageAccountKey 
+    $context = New-AzureStorageContext -StorageAccountName $Storage -StorageAccountKey $Key
  
     # Check if the defined container already exists 
     try { 
-        $azcontainer = Get-AzureStorageContainer -Name $Global:AzureBlobContainerName -Context $context -ErrorAction SilentlyContinue 
-    } catch {} 
+        $azcontainer = Get-AzureStorageContainer -Name $Container -Context $context -ErrorAction SilentlyContinue
+    } catch {Write-Log -Value "Something went wrong while trying to get container..."}
  
     If ($? -eq $false) { 
         # Something went wrong, check the last error message 
         If ($Error[0] -like "*Can not find the container*") { 
             # Container doesn't exist, create a new one 
-            Write-Log -Value "Container `"$Global:AzureBlobContainerName`" does not exist, trying to create container"
-            $azcontainer = New-AzureStorageContainer -Name $Global:AzureBlobContainerName -Context $context -ErrorAction SilentlyContinue 
+            Write-Log -Value "Container `"$Container`" does not exist, trying to create container"
+            $azcontainer = New-AzureStorageContainer -Name $Container -Context $context -ErrorAction SilentlyContinue
  
             If ($azcontainer -eq $null) { 
                 # Couldn't create container 
-                Write-Log -Value "ERROR: could not create container `"$Global:AzureBlobContainerName`""
+                Write-Log -Value "ERROR: could not create container `"$Container`""
                 return 
             } Else { 
                 # OK, container created 
-                Write-Log -Value "Container `"$Global:AzureBlobContainerName`" successfully created"
+                Write-Log -Value "Container `"$Container`" successfully created"
             } 
         } ElseIf ($Error[0] -like "*Container name * is invalid*") { 
             # Container name is invalid 
-            Write-Log -Value "ERROR: container name `"$Global:AzureBlobContainerName`" is invalid"
+            Write-Log -Value "ERROR: container name `"$Container`" is invalid"
         } ElseIf ($Error[0] -like "*(403) Forbidden*") { 
             # Storage Account key incorrect 
             Write-Log -Value "ERROR: could not connect to Azure storage, please check the Azure Storage Account key"
@@ -89,7 +87,7 @@ Param (
  
         # Check if the BLOB already exists 
         $copyblob = $false 
-        $azblob = Get-AzureStorageBlob -Blob $blobname -Container $Global:AzureBlobContainerName -Context $context -ErrorAction SilentlyContinue 
+        $azblob = Get-AzureStorageBlob -Blob $blobname -Container $Container -Context $context -ErrorAction SilentlyContinue
         If ($azblob -eq $null) { 
             # Blob doesn't exit, copy the file to Azure 
             Write-Log -Value "File does not exist on Azure" 
@@ -100,25 +98,21 @@ Param (
             # Blob doesn't exist, upload the blob
             Write-Log -Value "Copying local file $($file.Name) to blob $blobname in container $Container"
             try { 
-                $output = Set-AzureStorageBlobContent -File $file.FullName -Blob $blobname -Container $Global:AzureBlobContainerName -Context $context -Force -ErrorAction SilentlyContinue 
-            } catch { 
-                Write-Log -Value "ERROR: Could not copy file to Azure blob $($blobname): $($_.Exception.Message)"
-            } 
+                $output = Set-AzureStorageBlobContent -File $file.FullName -Blob $blobname -Container $Container -Context $context -Force -ErrorAction SilentlyContinue
+            } catch {Write-Log -Value "ERROR: Could not copy file to Azure blob $($blobname): $($_.Exception.Message)"}
         } 
     }
 
     # Removing Azure Blobs which doesn't contain local destination folder
-    ForEach($AzureBlob in (Get-AzureStorageBlob -Container $Global:AzureBlobContainerName -Context $context | Select Name)) {
+    ForEach($AzureBlob in (Get-AzureStorageBlob -Container $Container -Context $context | Select Name)) {
         # Checking if file exists in Azure Blob Storage
         if ($fileList.Contains($AzureBlob.Name.Replace("/","\")) -ne $true) {
             Write-Log -Value "$($AzureBlob.Name) should be removed. Removing..."
             # File doesn't exist in the destination folder anymore, trying to remove it
             try { 
-                Remove-AzureStorageBlob -Blob $AzureBlob.Name -Container $Global:AzureBlobContainerName -Context $context 
+                Remove-AzureStorageBlob -Blob $AzureBlob.Name -Container $Container -Context $context
                 Write-Log -Value "Successfully removed."
-            } catch { 
-                Write-Log -Value "ERROR: Could not remove Azure blob $($AzureBlob.Name): $($_.Exception.Message)"
-            }
+            } catch { Write-Log -Value "ERROR: Could not remove Azure blob $($AzureBlob.Name): $($_.Exception.Message)"}
         }
     }
 
