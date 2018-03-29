@@ -9,17 +9,16 @@ Param (
     $Global:AzureStorageAccountKey = "StorageAccountAccessKey"
     $Global:AzureBlobContainerName = "BlobStorageContainerName"
 
- Function Write-Log 
+    Function Write-Log
     { 
         Param ( 
             [Parameter(Mandatory=$true,Position=0)][String]$Value
-        ) 
-         
+        )
         $date = ("[{0:yyyy-MM-dd HH:mm:ss}] " -f (Get-Date)) 
         "$($date)$($Value)" | Add-Content -Path $LogFilePath
     }
 
-    Write-Log -Value "START"
+    Write-Log -Value "SYNCHRONIZATION STARTED"
     # Initiate the Azure Storage Context 
     $context = New-AzureStorageContext -StorageAccountName $Global:AzureStorageAccountName -StorageAccountKey $Global:AzureStorageAccountKey 
  
@@ -62,7 +61,10 @@ Param (
     }
 
     # Retrieve the files in the given folder
+    # @TODO Handle folders to not appear in files count
     $files = @()
+    # $fileList is a list which contains just file names including absolute path
+    # for future comparison with blob list in Azure Blob Storage
     $fileList = @()
     ForEach ($localpath in $Path) { 
         Write-Log -Value "Retrieving files from path $localpath" 
@@ -75,7 +77,7 @@ Param (
         } 
     } 
 
-    # Parse each file 
+    # Handle each file
     Write-Log -Value "Found $($files.Count) files" 
    
     ForEach ($file in ($files | Sort-Object -Property FullName)) { 
@@ -95,9 +97,8 @@ Param (
         }
  
         If ($copyblob -eq $true) { 
-            # Blob doesn't exist, upload the blob with lastwrite metadata 
-            Write-Log -Value "Copying local file $($file.Name) to blob $blobname in container $Container" 
- 
+            # Blob doesn't exist, upload the blob
+            Write-Log -Value "Copying local file $($file.Name) to blob $blobname in container $Container"
             try { 
                 $output = Set-AzureStorageBlobContent -File $file.FullName -Blob $blobname -Container $Global:AzureBlobContainerName -Context $context -Force -ErrorAction SilentlyContinue 
             } catch { 
@@ -108,10 +109,10 @@ Param (
 
     # Removing Azure Blobs which doesn't contain local destination folder
     ForEach($AzureBlob in (Get-AzureStorageBlob -Container $Global:AzureBlobContainerName -Context $context | Select Name)) {
-
+        # Checking if file exists in Azure Blob Storage
         if ($fileList.Contains($AzureBlob.Name.Replace("/","\")) -ne $true) {
             Write-Log -Value "$($AzureBlob.Name) should be removed. Removing..."
-
+            # File doesn't exist in the destination folder anymore, trying to remove it
             try { 
                 Remove-AzureStorageBlob -Blob $AzureBlob.Name -Container $Global:AzureBlobContainerName -Context $context 
                 Write-Log -Value "Successfully removed."
@@ -121,4 +122,4 @@ Param (
         }
     }
 
-    Write-Log -Value "END"
+    Write-Log -Value "SYNCHRONIZATION FINISHED"
